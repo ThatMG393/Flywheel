@@ -1,5 +1,6 @@
 package com.jozufozu.flywheel.core.vertex;
 
+import java.nio.BufferOverflowException;
 import java.nio.ByteBuffer;
 
 import org.lwjgl.system.MemoryUtil;
@@ -8,38 +9,44 @@ import com.jozufozu.flywheel.api.vertex.VertexList;
 import com.jozufozu.flywheel.util.RenderMath;
 
 public class PosTexNormalWriterUnsafe extends VertexWriterUnsafe<PosTexNormalVertex> {
+    // Vertex layout: 3 floats (position), 2 floats (texture), 3 bytes (normal)
+    private static final int FLOAT_SIZE = 4;
+    private static final int VERTEX_SIZE = (3 * FLOAT_SIZE) + (2 * FLOAT_SIZE) + 3; // 12 + 8 + 3 = 23
 
-	public PosTexNormalWriterUnsafe(PosTexNormalVertex type, ByteBuffer buffer) {
-		super(type, buffer);
-	}
+    // Starting pointer and calculated buffer end.
+    private long ptr;
+    private final long end;
 
-	@Override
-	public void writeVertex(VertexList list, int i) {
-		float x = list.getX(i);
-		float y = list.getY(i);
-		float z = list.getZ(i);
+    public PosTexNormalWriterUnsafe(PosTexNormalVertex type, ByteBuffer buffer) {
+        super(type, buffer);
+        if (!buffer.isDirect()) {
+            throw new IllegalArgumentException("Buffer must be direct");
+        }
+        ptr = MemoryUtil.memAddress(buffer);
+        end = ptr + buffer.capacity();
+    }
 
-		float u = list.getU(i);
-		float v = list.getV(i);
+    @Override
+    public void writeVertex(VertexList list, int i) {
+        if (ptr + VERTEX_SIZE > end) {
+            throw new BufferOverflowException();
+        }
+        
+        // Write position (x, y, z)
+        MemoryUtil.memPutFloat(ptr, list.getX(i));
+        MemoryUtil.memPutFloat(ptr + FLOAT_SIZE, list.getY(i));
+        MemoryUtil.memPutFloat(ptr + FLOAT_SIZE * 2, list.getZ(i));
 
-		float xN = list.getNX(i);
-		float yN = list.getNY(i);
-		float zN = list.getNZ(i);
+        // Write texture coordinates (u, v)
+        MemoryUtil.memPutFloat(ptr + FLOAT_SIZE * 3, list.getU(i));
+        MemoryUtil.memPutFloat(ptr + FLOAT_SIZE * 4, list.getV(i));
 
-		putVertex(x, y, z, xN, yN, zN, u, v);
-	}
+        // Write normals as bytes (using RenderMath.nb() conversion)
+        MemoryUtil.memPutByte(ptr + FLOAT_SIZE * 5, RenderMath.nb(list.getNX(i)));
+        MemoryUtil.memPutByte(ptr + FLOAT_SIZE * 5 + 1, RenderMath.nb(list.getNY(i)));
+        MemoryUtil.memPutByte(ptr + FLOAT_SIZE * 5 + 2, RenderMath.nb(list.getNZ(i)));
 
-	public void putVertex(float x, float y, float z, float nX, float nY, float nZ, float u, float v) {
-		MemoryUtil.memPutFloat(ptr, x);
-		MemoryUtil.memPutFloat(ptr + 4, y);
-		MemoryUtil.memPutFloat(ptr + 8, z);
-		MemoryUtil.memPutFloat(ptr + 12, u);
-		MemoryUtil.memPutFloat(ptr + 16, v);
-		MemoryUtil.memPutByte(ptr + 20, RenderMath.nb(nX));
-		MemoryUtil.memPutByte(ptr + 21, RenderMath.nb(nY));
-		MemoryUtil.memPutByte(ptr + 22, RenderMath.nb(nZ));
-
-		ptr += 23;
-		advance();
-	}
+        ptr += VERTEX_SIZE;
+        advance();
+    }
 }
